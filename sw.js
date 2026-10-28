@@ -1,16 +1,11 @@
 self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open('spese-v1').then((cache) => {
-      return cache.addAll([
-        './index.html',
-        './manifest.json'
-      ]);
-    })
-  );
+  self.skipWaiting();
+});
+
+self.addEventListener('activate', (e) => {
+  return self.clients.claim();
 });
 
 self.addEventListener('fetch', (e) => {
-  e.respondWith(
-    caches.match(e.request).then((response) => response || fetch(e.request))
-  );
+  // Risponde normalmente alle richieste di rete
 });
