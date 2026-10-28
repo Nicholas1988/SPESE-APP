@@ -1,9 +1,11 @@
 self.addEventListener('install', (e) => {
   e.waitUntil(
-    caches.open('spese-cache').then((cache) => cache.addAll([
-      './index.html',
-      './manifest.json'
-    ]))
+    caches.open('spese-v1').then((cache) => {
+      return cache.addAll([
+        './index.html',
+        './manifest.json'
+      ]);
+    })
   );
 });
 
