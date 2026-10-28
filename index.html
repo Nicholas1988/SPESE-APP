@@ -28,6 +28,9 @@ body.lock{overflow:hidden}
 html,body,button,input,label{touch-action:manipulation}
 button{font:inherit;color:inherit;cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+/* Su touchscreen elimina il flash blu di focus dopo il tap; mantiene il focus da tastiera su desktop. */
+@media (hover:none) and (pointer:coarse){.nav button:focus,.nav button:focus-visible{outline:none;box-shadow:none;-webkit-tap-highlight-color:transparent}}
+.nav button{-webkit-tap-highlight-color:transparent}
 .wrap{max-width:520px;width:100%;margin:0 auto;padding:0 18px 150px;flex:1}
 .vh{position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
 
@@ -893,30 +896,40 @@ function parseReceipt(text){
   var lines = String(text||'').split(/\r?\n/).map(function(l){return l.trim()}).filter(function(l){return l.length});
   var cand = [], restoV = null, i;
   for(i=0;i<lines.length;i++){
-    var raw = lines[i], amts = parseAmounts(cleanLine(raw));
+    var raw = lines[i], normalized = raw.replace(/[€]/g,' ').replace(/\bEUR\b/ig,' '), amts = parseAmounts(cleanLine(normalized));
     if(/\bresto\b/i.test(raw)){ if(amts.length) restoV = amts[amts.length-1]; continue; }
-    if(SKIPRE.test(raw)) continue;
+    if(SKIPRE.test(raw) || /\b(?:codice|articolo|quantità|quantita|pezzi|punti|operatore|transazione|terminal|autorizzazione)\b/i.test(raw)) continue;
     var sc = 0, k;
     for(k=0;k<KW.length;k++) if(KW[k][0].test(raw) && KW[k][1]>sc) sc = KW[k][1];
     if(sc>0){
-      if(!amts.length && i+1<lines.length && !SKIPRE.test(lines[i+1]) && !/[A-Za-z]{4,}/.test(lines[i+1])){
+      if(!amts.length && i+1<lines.length && !SKIPRE.test(lines[i+1]) && !/[A-Za-zÀ-ÿ]{4,}/.test(lines[i+1])){
         amts = parseAmounts(cleanLine(lines[i+1])); sc -= 5;
       }
-      if(amts.length) cand.push({v:amts[amts.length-1], s:sc});
-    } else {
-      amts.forEach(function(v){ cand.push({v:v, s:10}); });
+      if(amts.length) cand.push({v:amts[amts.length-1], s:sc, line:i});
+    } else if(amts.length){
+      /* Le cifre senza etichetta sono candidate deboli: non devono vincere
+         automaticamente su un importo totale riconosciuto. */
+      amts.forEach(function(v){ cand.push({v:v, s:10, line:i}); });
     }
   }
-  cand = cand.filter(function(c){ return c.v>0 && c.v<10000; }).map(function(c){ return {v:Math.round(c.v*100)/100, s:c.s}; });
-  cand.sort(function(a,b){ return b.s-a.s || b.v-a.v; });
+  cand = cand.filter(function(c){ return c.v>0 && c.v<10000 && isFinite(c.v); }).map(function(c){ return {v:Math.round(c.v*100)/100, s:c.s, line:c.line}; });
+  cand.sort(function(a,b){ return b.s-a.s || b.line-a.line || b.v-a.v; });
   var amount = null;
-  if(cand.length){
+  if(cand.length && cand[0].s>=60){
     amount = cand[0].v;
     if(cand[0].s===40 && restoV!==null && cand[0].v>restoV) amount = Math.round((cand[0].v-restoV)*100)/100;
+  } else {
+    /* Se OCR perde la parola TOTALE, cerca solo nella parte finale dello scontrino
+       e privilegia importi realistici; evita di scegliere numeri casuali in alto. */
+    var minLine = Math.floor(lines.length*0.55), tail = cand.filter(function(c){ return c.line>=minLine && c.s===10 && c.v>=0.5; });
+    if(tail.length){
+      tail.sort(function(a,b){ return b.line-a.line || b.v-a.v; });
+      amount = tail[0].v;
+    }
   }
   var seen = {}, others = [];
   if(amount!==null) seen[amount] = 1;
-  cand.forEach(function(c){ if(!seen[c.v] && others.length<4){ seen[c.v] = 1; others.push(c.v); } });
+  cand.forEach(function(c){ if(!seen[c.v] && others.length<4 && c.s>=10){ seen[c.v] = 1; others.push(c.v); } });
   return {amount:amount, candidates:others, date:parseDate(text||''), merchant:guessMerchant(lines)};
 }
 /* PARSE-END */
@@ -1003,7 +1016,7 @@ async function handleScan(file){
     };
     scanWorker = await Tesseract.createWorker('ita',1,{logger:function(m){ if(scanProg) scanProg(m); }});
     scanShow(scanBox('Leggo lo scontrino…','',25));
-    var res = await scanWorker.recognize(canvas);
+    var res = await scanWorker.recognize(canvas, {tessedit_pageseg_mode: 6});
     applyScan(parseReceipt(res.data.text));
   }catch(err){
     scanShow(scanBox('Lettura non riuscita','Controlla la connessione (serve la prima volta) oppure inserisci la cifra a mano.'));
