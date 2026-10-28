@@ -289,7 +289,7 @@ function load(){
   }catch(e){}
   return clone(DEF);
 }
-function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); if(window.speseDriveOnSave) window.speseDriveOnSave(); }catch(e){} }
 
 /* ---------- utilità ---------- */
 var nf0 = new Intl.NumberFormat('it-IT',{style:'currency',currency:'EUR',minimumFractionDigits:0,maximumFractionDigits:0});
@@ -650,6 +650,13 @@ function settingsHTML(){
     '<section><h2>Categorie</h2><div class="card rows">'+cats+'</div><button class="btn" data-act="cat-new">Aggiungi categoria</button></section>'+
     '<section><h2>Spese ricorrenti</h2><div class="card rows">'+recs+'</div><button class="btn" data-act="rec-new">Aggiungi spesa ricorrente</button></section>'+
     '<section><h2>Preferenze</h2><div class="card rows"><button class="row" data-act="toggle-haptics" role="switch" aria-checked="'+(S.haptics?'true':'false')+'"><span class="main"><div class="t">Vibrazione</div><div class="s">Quando salvi una spesa o un’entrata</div></span><span class="tgl'+(S.haptics?' on':'')+'"></span></button></div></section>'+
+    '<section><h2>Google Drive</h2><p class="hint" style="margin-top:0">Collega il tuo account Google per conservare una copia chiamata <b>spese_budget.json</b> su Drive e sincronizzare telefono e PC. I dati restano salvati anche offline su questo dispositivo.</p>'+
+    '<label class="hint" for="drive-client-id">ID client Google (da configurare una sola volta)</label>'+
+    '<input class="in" id="drive-client-id" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="xxxxx.apps.googleusercontent.com">'+
+    '<p class="hint" id="drive-status">Google Drive non collegato.</p>'+
+    '<button class="btn" data-drive="connect">Collega Google Drive</button>'+
+    '<button class="btn" data-drive="sync">Sincronizza adesso</button>'+
+    '<p class="hint">Per sicurezza, al primo collegamento non verranno uniti o sovrascritti dati in automatico se esiste già un backup diverso: potrai scegliere se usare i dati del telefono o quelli di Drive.</p></section>'+
     '<section><h2>Dati</h2><p class="hint" style="margin-top:0">Le spese restano salvate su questo dispositivo, nel browser che stai usando.</p>'+
     '<button class="btn" data-act="export">Esporta Backup</button>'+
     '<button class="btn" data-act="import-btn" style="margin-bottom: 10px;">Importa Backup</button>'+
@@ -1166,6 +1173,70 @@ window.addEventListener('resize', function(){ moveLens(false); });
 render();
 })();
 </script>
+
+<script>
+/* Google Drive sync: dati locali conservati; conflitti mai risolti sovrascrivendo in silenzio. */
+(function(){
+  'use strict';
+  var DATA_KEY='spese-budget-v1', CFG_KEY='spese-budget-drive-config-v1', BASE_KEY='spese-budget-drive-base-v1';
+  var tokenClient=null, accessToken=null, tokenExpiry=0, busy=false, timer=null;
+  function cfg(){try{return JSON.parse(localStorage.getItem(CFG_KEY)||'{}')}catch(e){return {}}}
+  function status(t){var el=document.getElementById('drive-status');if(el)el.textContent=t;}
+  function localData(){return localStorage.getItem(DATA_KEY)||'{}'}
+  function hash(s){var h=2166136261;for(var i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619)}return (h>>>0).toString(16)}
+  function saveCfg(c){localStorage.setItem(CFG_KEY,JSON.stringify(c))}
+  function ensureGIS(){return new Promise(function(resolve,reject){if(window.google&&google.accounts&&google.accounts.oauth2){resolve();return}var existing=document.querySelector('script[data-google-gis]');if(existing){existing.addEventListener('load',resolve,{once:true});existing.addEventListener('error',reject,{once:true});return}var sc=document.createElement('script');sc.src='https://accounts.google.com/gsi/client';sc.async=true;sc.defer=true;sc.dataset.googleGis='1';sc.onload=resolve;sc.onerror=reject;document.head.appendChild(sc)})}
+  async function connect(){
+    var field=document.getElementById('drive-client-id'), clientId=(field&&field.value||cfg().clientId||'').trim();
+    if(!clientId){status('Inserisci prima l’ID client Google.');alert('Per collegare Drive serve un ID client OAuth creato in Google Cloud. Ti guiderò nella configurazione.');return}
+    saveCfg({clientId:clientId});
+    try{await ensureGIS()}catch(e){status('Impossibile caricare il servizio Google. Controlla la connessione.');return}
+    if(!window.google||!google.accounts||!google.accounts.oauth2){status('Servizio di accesso Google non disponibile.');return}
+    tokenClient=google.accounts.oauth2.initTokenClient({client_id:clientId,scope:'https://www.googleapis.com/auth/drive.file',callback:async function(resp){
+      if(resp.error){status('Accesso Google non riuscito: '+resp.error);return}
+      accessToken=resp.access_token;tokenExpiry=Date.now()+(Number(resp.expires_in||3600)-60)*1000;
+      status('Google collegato per questa sessione. Sincronizzazione in corso…'); await sync();
+    }});
+    tokenClient.requestAccessToken({prompt:'consent'});
+  }
+  function auth(){if(accessToken&&Date.now()<tokenExpiry)return Promise.resolve(accessToken);return Promise.reject(new Error('Sessione Google scaduta: premi “Collega Google Drive” per ricollegarti.'))}
+  async function api(url,opts){var tok=await auth();opts=opts||{};opts.headers=Object.assign({},opts.headers||{},{Authorization:'Bearer '+tok});var r=await fetch(url,opts);if(!r.ok){var t=await r.text();throw new Error('Google Drive ('+r.status+'): '+t.slice(0,180))}if(r.status===204)return null;return r.json()}
+  async function findFile(){var q="name='spese_budget.json' and trashed=false";var r=await api('https://www.googleapis.com/drive/v3/files?q='+encodeURIComponent(q)+'&fields=files(id,name,mimeType,modifiedTime)&pageSize=100');return (r.files||[]).sort(function(a,b){return (b.modifiedTime||'').localeCompare(a.modifiedTime||'')})[0]||null}
+  async function readFile(file){var tok=await auth();var r=await fetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(file.id)+'?alt=media',{headers:{Authorization:'Bearer '+tok}});if(!r.ok)throw new Error('Non riesco a leggere il backup da Drive ('+r.status+').');return await r.text()}
+  async function writeFile(fileId,content){var tok=await auth(), meta={name:'spese_budget.json',mimeType:'application/json'};var url,method,body;
+    if(fileId){url='https://www.googleapis.com/upload/drive/v3/files/'+encodeURIComponent(fileId)+'?uploadType=multipart&fields=id,name,modifiedTime';method='PATCH'}
+    else{url='https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,modifiedTime';method='POST'}
+    var boundary='spese_budget_'+Math.random().toString(16).slice(2), part1='--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+JSON.stringify(meta)+'\r\n--'+boundary+'\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n'+content+'\r\n--'+boundary+'--';
+    var r=await fetch(url,{method:method,headers:{Authorization:'Bearer '+tok,'Content-Type':'multipart/related; boundary='+boundary},body:part1});if(!r.ok)throw new Error('Non riesco a salvare il backup su Drive ('+r.status+').');return r.json();
+  }
+  function validData(text){var d=JSON.parse(text);return d&&typeof d==='object'&&Array.isArray(d.categories)&&Array.isArray(d.expenses)&&Array.isArray(d.income)&&Array.isArray(d.recurring)}
+  async function sync(){if(busy)return;busy=true;try{
+    var local=localData(), localHash=hash(local), c=cfg();
+    var file=await findFile();
+    if(!file){var made=await writeFile(null,local);saveCfg({clientId:c.clientId,fileId:made.id});localStorage.setItem(BASE_KEY,localHash);status('Backup creato su Google Drive: spese_budget.json.');return}
+    if(c.fileId!==file.id){saveCfg({clientId:c.clientId,fileId:file.id});}
+    var remote=await readFile(file);if(!validData(remote))throw new Error('Il file spese_budget.json su Drive non ha un formato valido. I dati locali non sono stati modificati.');
+    var remoteHash=hash(remote), base=localStorage.getItem(BASE_KEY);
+    if(localHash===remoteHash){localStorage.setItem(BASE_KEY,localHash);status('Telefono/PC aggiornati: i dati sono già sincronizzati.');return}
+    if(!base){var choice=confirm('Esiste già spese_budget.json su Google Drive e i dati non risultano ancora collegati. Premi OK per caricare i dati di QUESTO dispositivo su Drive, oppure Annulla per importare sul dispositivo i dati presenti su Drive.');
+      if(choice){var up=await writeFile(file.id,local);localStorage.setItem(BASE_KEY,localHash);status('Dati di questo dispositivo salvati su Drive.');}
+      else{localStorage.setItem(DATA_KEY,remote);if(window.speseBudgetReload)window.speseBudgetReload();localStorage.setItem(BASE_KEY,remoteHash);status('Dati di Drive importati su questo dispositivo.');}
+      return;
+    }
+    if(localHash===base&&remoteHash!==base){localStorage.setItem(DATA_KEY,remote);if(window.speseBudgetReload)window.speseBudgetReload();localStorage.setItem(BASE_KEY,remoteHash);status('Aggiornamento scaricato da Drive.');return}
+    if(remoteHash===base&&localHash!==base){await writeFile(file.id,local);localStorage.setItem(BASE_KEY,localHash);status('Modifiche caricate su Drive.');return}
+    var useLocal=confirm('Ci sono modifiche diverse sia su questo dispositivo sia su Drive. OK = mantieni e carica i dati di questo dispositivo su Drive. Annulla = scarica i dati di Drive su questo dispositivo. Prima di scegliere, puoi esportare un backup locale.');
+    if(useLocal){await writeFile(file.id,local);localStorage.setItem(BASE_KEY,localHash);status('Conflitto risolto: dati di questo dispositivo salvati su Drive.');}
+    else{localStorage.setItem(DATA_KEY,remote);if(window.speseBudgetReload)window.speseBudgetReload();localStorage.setItem(BASE_KEY,remoteHash);status('Conflitto risolto: dati di Drive importati.');}
+  }catch(e){status(e.message||'Sincronizzazione non riuscita. I dati locali sono rimasti disponibili.')}finally{busy=false}}
+  window.speseDriveOnSave=function(){if(accessToken&&Date.now()<tokenExpiry){clearTimeout(timer);timer=setTimeout(sync,1200)}};
+  window.speseBudgetReload=function(){location.reload()};
+  document.addEventListener('click',function(e){var b=e.target.closest('[data-drive]');if(!b)return;e.preventDefault();if(b.getAttribute('data-drive')==='connect')connect();else if(b.getAttribute('data-drive')==='sync')sync()});
+  document.addEventListener('focusin',function(e){if(e.target&&e.target.id==='drive-client-id')e.target.value=cfg().clientId||e.target.value});
+  document.addEventListener('DOMContentLoaded',function(){var f=document.getElementById('drive-client-id');if(f)f.value=cfg().clientId||'';status('Drive non collegato in questa sessione. I dati locali sono al sicuro; collega Google per sincronizzare.')});
+})();
+</script>
+
 <script>
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('sw.js');
