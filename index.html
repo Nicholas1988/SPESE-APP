@@ -171,7 +171,7 @@ input.amount{font-size:32px;font-weight:800;letter-spacing:-0.02em;padding:10px 
 .sw.on{border-color:var(--surface);box-shadow:0 0 0 2.5px var(--ink)}
 
 /* cambio schermata */
-#app.swap{animation:swap .42s cubic-bezier(.2,.8,.2,1)}
+#app.swap{animation:swap .2s cubic-bezier(.2,.8,.2,1)}
 @keyframes swap{
   from{opacity:0;transform:translateX(calc(var(--dx,1)*24px)) scale(.985);filter:blur(10px)}
   to{opacity:1;transform:none;filter:blur(0)}
@@ -257,7 +257,7 @@ var KEY = 'spese-budget-v1';
 
 /* ---------- dati ---------- */
 var DEF = {
-  budget:1200,
+  budget:0,
   categories:[
     {id:'casa',name:'Casa',color:'#3B6FD8',budget:500},
     {id:'spesa',name:'Spesa',color:'#2E9E6B',budget:300},
@@ -617,7 +617,14 @@ function reportHTML(){
   if(peak) hl += '<div class="hrow"><span>Mese più caro</span><b>'+monthLabel(peak.m).split(' ')[0]+' · '+fmt(peak.spent)+'</b></div>';
   if(light && peak && light!==peak) hl += '<div class="hrow"><span>Mese più leggero</span><b>'+monthLabel(light.m).split(' ')[0]+' · '+fmt(light.spent)+'</b></div>';
   if(crow.length) hl += '<div class="hrow"><span>Categoria principale</span><b>'+esc(crow[0].c.name)+' · '+Math.round(crow[0].v/spent*100)+'%</b></div>';
-  var hlSec = hl ? '<section><h2>In breve</h2><div class="card">'+hl+'</div></section>' : '';
+  
+  var tips = '';
+  if(spent > 0 && crow.length > 0){
+    var topCat = crow[0].c.name;
+    var topPct = Math.round(crow[0].v/spent*100);
+    tips = '<section><h2>Consigli Smart</h2><div class="card pad" style="border-left:4px solid var(--accent)">Stai concentrando il '+topPct+'% delle tue spese nella categoria <b>'+esc(topCat)+'</b>. Rivedere gli abbonamenti o le spese non essenziali in questo settore è il modo più rapido per aumentare i tuoi risparmi questo mese.</div></section>';
+  }
+  var hlSec = (hl ? '<section><h2>In breve</h2><div class="card">'+hl+'</div></section>' : '') + tips;
 
   return yearHeaderHTML()+kpis+chartSec+hlSec+catSec;
 }
@@ -637,7 +644,11 @@ function settingsHTML(){
     '<section><h2>Categorie</h2><div class="card rows">'+cats+'</div><button class="btn" data-act="cat-new">Aggiungi categoria</button></section>'+
     '<section><h2>Spese ricorrenti</h2><div class="card rows">'+recs+'</div><button class="btn" data-act="rec-new">Aggiungi spesa ricorrente</button></section>'+
     '<section><h2>Preferenze</h2><div class="card rows"><button class="row" data-act="toggle-haptics" role="switch" aria-checked="'+(S.haptics?'true':'false')+'"><span class="main"><div class="t">Vibrazione</div><div class="s">Quando salvi una spesa o un’entrata</div></span><span class="tgl'+(S.haptics?' on':'')+'"></span></button></div></section>'+
-    '<section><h2>Dati</h2><p class="hint" style="margin-top:0">Le spese restano salvate su questo dispositivo, nel browser che stai usando.</p><button class="btn danger" data-act="reset">Cancella tutti i dati</button></section>';
+    '<section><h2>Dati</h2><p class="hint" style="margin-top:0">Le spese restano salvate su questo dispositivo, nel browser che stai usando.</p>'+
+    '<button class="btn" data-act="export">Esporta Backup</button>'+
+    '<button class="btn" data-act="import-btn" style="margin-bottom: 10px;">Importa Backup</button>'+
+    '<input type="file" id="import-file" class="vh" accept=".json" tabindex="-1">'+
+    '<button class="btn danger" data-act="reset">Cancella tutti i dati</button></section>';
 }
 
 var TABS = ['home','list','income','report','settings'];
@@ -1009,7 +1020,7 @@ document.addEventListener('click', function(ev){
   switch(act){
     case 'tab':
       var nt = el.getAttribute('data-tab');
-      if(nt!==view.tab){ swapDir = TABS.indexOf(nt)>TABS.indexOf(view.tab) ? 1 : -1; view.tab = nt; render(true); window.scrollTo(0,0); }
+      if(nt!==view.tab){ swapDir = TABS.indexOf(nt)>TABS.indexOf(view.tab) ? 1 : -1; view.tab = nt; render(true); }
       break;
     case 'yprev': view.year--; view.rsel = null; render(); break;
     case 'ynext': view.year++; view.rsel = null; render(); break;
@@ -1062,6 +1073,16 @@ document.addEventListener('click', function(ev){
     case 'save-rec': saveRec(); break;
     case 'del-rec':
       S.recurring = S.recurring.filter(function(x){return x.id!==draft.id}); save(); closeSheet(); render(); toast('Spesa ricorrente eliminata'); break;
+    case 'export':
+      var dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(localStorage.getItem(KEY) || JSON.stringify(DEF));
+      var a = document.createElement('a');
+      a.href = dataStr; a.download = "backup_spese.json";
+      a.click();
+      break;
+    case 'import-btn':
+      var fi = $('#import-file');
+      if(fi) fi.click();
+      break;
     case 'reset':
       S = clone(DEF); save(); view.filter='all'; render(); toast('Dati cancellati'); break;
     case 'close': closeSheet(); break;
@@ -1069,6 +1090,25 @@ document.addEventListener('click', function(ev){
   }catch(err){ closeSheet(); toast('Qualcosa non ha funzionato. Riprova.','bad'); }
 });
 document.addEventListener('change', function(ev){
+  if(ev.target && ev.target.id === 'import-file'){
+    var file = ev.target.files[0];
+    if(!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e){
+      try {
+        var parsed = JSON.parse(e.target.result);
+        if(parsed && typeof parsed === 'object'){
+          localStorage.setItem(KEY, e.target.result);
+          S = load(); view.filter='all'; render(); toast('Backup importato');
+        } else {
+          toast('File non valido', 'bad');
+        }
+      } catch(err) { toast('Errore file', 'bad'); }
+    };
+    reader.readAsText(file);
+    ev.target.value = '';
+    return;
+  }
   if(ev.target && (ev.target.id==='scan-cam' || ev.target.id==='scan-gal')){
     var f = ev.target.files && ev.target.files[0]; ev.target.value = ''; handleScan(f); return;
   }
