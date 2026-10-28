@@ -1,7 +1,7 @@
 {
   "name": "Gestione Spese",
   "short_name": "Spese",
-  "start_url": "./index.html",
+  "start_url": "/SPESE-APP/",
   "scope": "./",
   "display": "standalone",
   "background_color": "#121212",
