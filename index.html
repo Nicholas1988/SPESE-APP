@@ -23,12 +23,12 @@
 }
 html{background:#000;scroll-padding-top:env(safe-area-inset-top,0px);-webkit-text-size-adjust:100%}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-variant-numeric:tabular-nums}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 'Manrope',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;font-variant-numeric:tabular-nums;min-height:100vh;display:flex;flex-direction:column}
 body.lock{overflow:hidden}
 html,body,button,input,label{touch-action:manipulation}
 button{font:inherit;color:inherit;cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
-.wrap{max-width:520px;margin:0 auto;padding:0 18px 150px}
+.wrap{max-width:520px;width:100%;margin:0 auto;padding:0 18px 150px;flex:1}
 .vh{position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;overflow:hidden;pointer-events:none}
 
 /* header */
@@ -171,9 +171,10 @@ input.amount{font-size:32px;font-weight:800;letter-spacing:-0.02em;padding:10px 
 .sw.on{border-color:var(--surface);box-shadow:0 0 0 2.5px var(--ink)}
 
 /* cambio schermata */
+#app{position:relative;width:100%}
 #app.swap{animation:swap .2s cubic-bezier(.2,.8,.2,1)}
 @keyframes swap{
-  from{opacity:0;transform:translateX(calc(var(--dx,1)*24px)) scale(.985);filter:blur(10px)}
+  from{opacity:0;transform:translateX(calc(var(--dx,1)*16px));filter:blur(4px)}
   to{opacity:1;transform:none;filter:blur(0)}
 }
 
@@ -184,11 +185,11 @@ input.amount{font-size:32px;font-weight:800;letter-spacing:-0.02em;padding:10px 
   border:1px solid var(--glass-edge);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.24),inset 0 -1px 0 rgba(255,255,255,.05),0 14px 34px rgba(0,0,0,.75)}
 .nav .in{position:relative;display:grid;grid-template-columns:repeat(5,1fr);padding:6px}
-.lens{position:absolute;top:6px;bottom:6px;left:6px;width:calc((100% - 12px)/5);transition:transform .62s cubic-bezier(.3,1.35,.5,1);will-change:transform;pointer-events:none}
+.lens{position:absolute;top:6px;bottom:6px;left:6px;width:calc((100% - 12px)/5);transition:transform .4s cubic-bezier(.3,1.35,.5,1);will-change:transform;pointer-events:none}
 .lens i{position:absolute;inset:0;border-radius:28px;background:linear-gradient(180deg,rgba(255,255,255,.20),rgba(255,255,255,.08));border:1px solid rgba(255,255,255,.26);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.4),inset 0 -8px 14px rgba(255,255,255,.05),0 6px 16px rgba(0,0,0,.5)}
-.lens.go i{animation:squish .62s ease}
-@keyframes squish{0%{transform:scale(1)}30%{transform:scale(1.3,.86)}65%{transform:scale(.97,1.05)}100%{transform:scale(1)}}
+.lens.go i{animation:squish .4s ease}
+@keyframes squish{0%{transform:scale(1)}30%{transform:scale(1.2,.9)}65%{transform:scale(.98,1.02)}100%{transform:scale(1)}}
 .nav button{position:relative;z-index:1;border:0;background:none;padding:9px 0 8px;display:grid;justify-items:center;gap:2px;color:var(--muted);font-size:10.5px;font-weight:600;border-radius:26px;transition:color .25s,transform .15s}
 .nav button.on{color:var(--ink)}
 .nav button:active{transform:scale(.92)}
@@ -571,7 +572,7 @@ function reportHTML(){
     '<div><span>Entrate</span><b>'+fmt(inc)+'</b></div>'+
     '<div><span>Saldo</span><b class="'+(inc>0?(bal<0?'neg':'pos'):'')+'">'+(inc>0?fmt(bal):'—')+'</b></div>'+
     '<div><span>Media al mese</span><b>'+fmt(avg)+'</b></div></div>'+
-    (inc>0 ? (bal>0 ? '<p class="hint">Nel '+y+' hai messo da parte il '+Math.round(bal/inc*100)+'% delle entrate.</p>' : (bal<0 ? '<p class="hint">Nel '+y+' hai speso '+fmt(-bal)+' più di quanto hai incassato.</p>' : '')) : '<p class="hint">Aggiungi le entrate nella scheda Entrate per vedere il saldo.</p>')+
+    (inc>0 ? (bal>0 ? '<p class="hint">Nel '+y+' hai messo da parte il '+Math.round(bal/inc*100)+'% delle entrate.</p>' : (bal<0 ? '<p class="hint">Nel '+y+' hai speso '+fmt(-bal)+' più di quanto hai incassato.</p>':'')) : '<p class="hint">Aggiungi le entrate nella scheda Entrate per vedere il saldo.</p>')+
   '</section>';
 
   var legend;
